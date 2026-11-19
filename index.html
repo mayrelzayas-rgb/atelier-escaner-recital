@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atelier de Cuerdas - Escáner</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f6f0e5;
+      color: #44382c;
+      margin: 0;
+      padding: 18px;
+    }
+    main {
+      max-width: 520px;
+      margin: auto;
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      border: 1px solid #c6a66b;
+    }
+    h1 {
+      color: #8b6b31;
+      font-size: 22px;
+      text-align: center;
+    }
+    button {
+      background: #8b6b31;
+      color: white;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 16px;
+      width: 100%;
+      margin-top: 10px;
+    }
+    button:disabled { opacity: 0.5; }
+    #reader { width: 100%; margin: 16px auto; }
+    #result {
+      padding: 16px;
+      margin-top: 14px;
+      border-radius: 10px;
+      background: #f4f0e8;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+    .good { background: #e2f0d9 !important; color: #245b2a; }
+    .bad { background: #fce8e6 !important; color: #8a1c13; }
+    .small {
+      font-size: 13px;
+      color: #6d6254;
+      line-height: 1.5;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Atelier de Cuerdas</h1>
+  <p class="small">Control de acceso · Recital de Navidad</p>
+  <p class="small">Escanea el QR y verifica el nombre del invitado. Cada boleto permite una sola entrada.</p>
+
+  <div id="reader"></div>
+  <div id="result">Listo para escanear.</div>
+
+  <button id="startButton" onclick="startScan()">Iniciar cámara</button>
+  <button id="nextButton" onclick="startScan()" style="display:none">Escanear siguiente boleto</button>
+
+
+<script>
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwp80JQEbbM2pFQeCvhN1AXaZNG7mXzu7xOGvcKJpfysbD5XiU9oUkHbDBoT6KJWRhz/exec";
+
+  let scanner = null;
+  let processing = false;
+  let requestNumber = 0;
+
+  function show(message, ok) {
+    const el = document.getElementById("result");
+    el.textContent = message;
+    el.className = ok ? "good" : "bad";
+  }
+
+  function validateQR(qrText) {
+    return new Promise((resolve, reject) => {
+      const callbackName = "atelierCallback" + (++requestNumber);
+      const script = document.createElement("script");
+      const url = new URL(SCRIPT_URL);
+
+      url.searchParams.set("action", "validate");
+      url.searchParams.set("qrText", qrText);
+      url.searchParams.set("callback", callbackName);
+
+      const cleanup = () => {
+        delete window[callbackName];
+        script.remove();
+      };
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Tiempo de espera agotado."));
+      }, 15000);
+
+      window[callbackName] = result => {
+        clearTimeout(timeout);
+        cleanup();
+        resolve(result);
+      };
+
+      script.onerror = () => {
+        clearTimeout(timeout);
+        cleanup();
+        reject(new Error("No se pudo conectar con Google Apps Script."));
+      };
+
+      script.src = url.toString();
+      document.body.appendChild(script);
+    });
+  }
+
+  async function startScan() {
+    if (processing) return;
+
+    if (!window.Html5Qrcode) {
+      show("No se pudo cargar el lector QR.", false);
+      return;
+    }
+
+    document.getElementById("startButton").disabled = true;
+    document.getElementById("nextButton").style.display = "none";
+
+    try {
+      if (!scanner) {
+        scanner = new Html5Qrcode("reader");
+      }
+
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 240, height: 240 } },
+
+        async decoded => {
+          if (processing) return;
+          processing = true;
+
+          try {
+            await scanner.stop();
+
+            const r = await validateQR(decoded);
+
+            show(
+              (r.message || "") +
+              (r.folio ? "\nFolio: " + r.folio : "") +
+              (r.nombre ? "\nInvitado: " + r.nombre : ""),
+              !!r.ok
+            );
+
+          } catch (e) {
+            show("Error: " + e.message, false);
+
+          } finally {
+            processing = false;
+            document.getElementById("startButton").disabled = false;
+            document.getElementById("nextButton").style.display = "block";
+          }
+        },
+
+        () => {}
+      );
+
+    } catch (e) {
+      show("No se pudo iniciar la cámara: " + e.message, false);
+      document.getElementById("startButton").disabled = false;
+    }
+  }
+</script>
+
+</main>
+</body>
+</html>
